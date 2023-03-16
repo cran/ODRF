@@ -83,16 +83,23 @@ predict.ODT <- function(object, Xnew, leafnode = FALSE, ...) {
   p <- ncol(Xnew)
   n <- nrow(Xnew)
 
+  nodeNumLabel=ppTree$structure$nodeNumLabel
   if (ppTree$split != "mse") {
-    nodeLabel <- colnames(ppTree$structure$nodeNumLabel)[max.col(ppTree$structure$nodeNumLabel)] ## "random"
-    nodeLabel[which(rowSums(ppTree$structure$nodeNumLabel) == 0)] <- 0
+    if(all(ppTree$structure$nodeCutValue == 0)){
+      nodeNumLabel=matrix(nodeNumLabel,nrow = 1, ncol = length(ppTree$Levels))
+    }
+    nodeLabel <- ppTree$Levels[max.col(nodeNumLabel)]
+    #nodeLabel <- colnames(ppTree$structure$nodeNumLabel)[max.col(ppTree$structure$nodeNumLabel)] ## "random"
+    nodeLabel[which(rowSums(nodeNumLabel) == 0)] <- "0"
   } else {
-    nodeLabel <- as.character(ppTree$structure$nodeNumLabel[, 1])
+    nodeLabel <- as.character(nodeNumLabel[, 1])
   }
 
   if (all(ppTree$structure$nodeCutValue == 0)) {
+    #nodeLabel <- names(ppTree$structure$nodeNumLabel)[which.max(ppTree$structure$nodeNumLabel)]
     pred <- rep(nodeLabel, n)
   } else {
+
     Xcat <- ppTree$data$Xcat
     catLabel <- ppTree$data$catLabel
     numCat <- 0
@@ -114,11 +121,15 @@ predict.ODT <- function(object, Xnew, leafnode = FALSE, ...) {
         xj <- xj1
       }
 
-      Xnew <- cbind(Xnew1, apply(Xnew[, -Xcat], 2, as.numeric))
+      #Xnew <- cbind(Xnew1, apply(Xnew[, -Xcat], 2, as.numeric))
+      Xnew <- cbind(Xnew1, Xnew[, -Xcat])
       p <- ncol(Xnew)
       numCat <- length(unlist(catLabel))
       rm(Xnew1)
       rm(Xnewj)
+    }
+    if (!is.numeric(Xnew)){
+      Xnew=apply(Xnew, 2, as.numeric)
     }
 
     # Variable scaling.

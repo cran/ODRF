@@ -1,7 +1,7 @@
 Type: Package
 Package: ODRF
 Title: Oblique Decision Random Forest for Classification and Regression
-Version: 0.0.2
+Version: 0.0.3
 Authors@R: c(
     person("Yu", "Liu", , "liuyuchina123@gmail.com", role = c("aut", "cre", "cph")),
     person("Yingcun", "Xia", , "staxyc@nus.edu.sg", role = "aut")
@@ -33,6 +33,6 @@ Language: en-US
 LazyData: yes
 NeedsCompilation: yes
 RoxygenNote: 7.2.3
-Packaged: 2023-02-27 17:01:12 UTC; Administrator
+Packaged: 2023-03-16 15:16:48 UTC; Administrator
 Repository: CRAN
-Date/Publication: 2023-02-28 17:12:35 UTC
+Date/Publication: 2023-03-16 16:00:02 UTC

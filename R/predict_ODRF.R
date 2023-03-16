@@ -112,6 +112,9 @@ predict.ODRF <- function(object, Xnew, type = "response", weight.tree = FALSE, .
     rm(Xnew1)
     rm(Xnewj)
   }
+  if (!is.numeric(Xnew)){
+    Xnew=apply(Xnew, 2, as.numeric)
+  }
 
   # Variable scaling.
   if (ppForest$data$Xscale != "No") {
@@ -135,15 +138,17 @@ predict.ODRF <- function(object, Xnew, type = "response", weight.tree = FALSE, .
   }, VALUE)
   Votes <- t(TreePrediction)
 
-  if ((!ppForest$forest$storeOOB) && weight.tree) {
-    stop("out-of-bag indices for each tree are not stored. ODRF must be called with storeOOB = TRUE.")
+
+  oobErr <- rep(1, ntrees)
+  if (weight.tree) {
+    if (ppForest$forest$numOOB == 0){
+      warning("numOOB=0, weight.tree = TRUE invalid")
+      #stop("out-of-bag indices for each tree are not stored. ODRF must be called with storeOOB = TRUE.")
+    }else{
+      oobErr <- sapply(ppForest$ppTrees, function(trees) trees$oobErr)
+    }
   }
-  if ((ppForest$forest$numOOB > 0) && ppForest$forest$storeOOB) {
-    oobErr <- sapply(ppForest$ppTrees, function(trees) trees$oobErr)
-  } else {
-    oobErr <- rep(1, ntrees)
-    warning("numOOB=0, weight.tree = TRUE invalid")
-  }
+
   weights <- weight.tree * oobErr + (!weight.tree)
   weights <- weights / sum(weights)
   if (ppForest$split != "mse") {

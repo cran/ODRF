@@ -8,7 +8,7 @@
 #' @param y A response vector of length n.
 #' @param split The criterion used for splitting the nodes. "entropy": information gain and "gini": gini impurity index for classification; "mse": mean square error for regression;
 #' 'auto' (default): If the response in \code{data} or \code{y} is a factor, "gini" is used, otherwise regression is assumed.
-#' @param lambda The adjustment parameter of \code{split} is used to determine whether to split or not, with the available values being 0, 1 and 'log' (Default).
+#' @param lambda The argument of \code{split} is used to determine the penalty level of the partition criterion. Three options are provided including, \code{lambda=0}: no penalty; \code{lambda=2}: AIC penalty; \code{lambda='log'} (Default): BIC penalty. In Addition, lambda can be any value from 0 to n (training set size).
 #' @param NodeRotateFun Name of the function of class \code{character} that implements a linear combination of predictors in the split node.
 #' including \itemize{
 #' \item{"RotMatPPO": projection pursuit optimization model (\code{\link{PPO}}), see \code{\link{RotMatPPO}} (default, model="PPR").}
@@ -344,6 +344,9 @@ ODRF.compute <- function(formula, Call, varName, X, y, split, lambda, NodeRotate
     varName <- c(paste(rep(seq_along(numCat), numCat), unlist(catLabel), sep = "."), varName[-Xcat])
     rm(X1)
     p <- ncol(X)
+  }
+  if (!is.numeric(X)){
+    X=apply(X, 2, as.numeric)
   }
   X <- as.matrix(X)
   colnames(X) <- varName

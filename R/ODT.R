@@ -8,7 +8,7 @@
 #' @param y A response vector of length n.
 #' @param split The criterion used for splitting the nodes. "entropy": information gain and "gini": gini impurity index for classification; "mse": mean square error for regression;
 #' 'auto' (default): If the response in \code{data} or \code{y} is a factor, "gini" is used, otherwise regression is assumed.
-#' @param lambda The adjustment parameter of \code{split} is used to determine whether to split or not, with the available values being 0, 1 and 'log' (Default).
+#' @param lambda The argument of \code{split} is used to determine the penalty level of the partition criterion. Three options are provided including, \code{lambda=0}: no penalty; \code{lambda=2}: AIC penalty; \code{lambda='log'} (Default): BIC penalty. In Addition, lambda can be any value from 0 to n (training set size).
 #' @param NodeRotateFun Name of the function of class \code{character} that implements a linear combination of predictors in the split node.
 #' including \itemize{
 #' \item{"RotMatPPO": projection pursuit optimization model (\code{\link{PPO}}), see \code{\link{RotMatPPO}} (default, model="PPR").}
@@ -83,6 +83,12 @@
 #' pred <- predict(tree, test_data[, -1])
 #' # estimation error
 #' mean((pred - test_data[, 1])^2)
+#'
+#' # Projection analysis of the oblique decision tree.
+#' data(iris)
+#' tree <- ODT(Species ~ ., data = iris, split="gini",
+#'             paramList = list(model = "PPR", numProj = 1))
+#' print(round(tree[["projections"]],3))
 #'
 #' ### Train ODT on one-of-K encoded categorical data ###
 #' set.seed(22)
@@ -272,7 +278,7 @@ ODT.default <- function(X, y, split = "auto", lambda = "log", NodeRotateFun = "R
   )
 
   nodeRotaMat <- ppTree$structure$nodeRotaMat
-  cutNode <- unique(nodeRotaMat[, 2][nodeRotaMat[, 1] != 0])
+  cutNode <- which(ppTree$structure$nodeCutValue!= 0)# unique(nodeRotaMat[nodeRotaMat[, 1] != 0, 2])
   projections <- NULL
   if (length(cutNode) > 0) {
     projections <- matrix(0, length(cutNode), ppTree$data$p)
@@ -329,6 +335,7 @@ ODT.compute <- function(formula, Call, varName, X, y, split, lambda, NodeRotateF
   if (split != "mse") {
     if (is.null(Levels)) {
       Levels <- levels(as.factor(y))
+      y <- as.integer(as.factor(y))
     }
     maxLabel <- length(Levels)
     if (length(Levels) == 1) {
@@ -365,6 +372,9 @@ ODT.compute <- function(formula, Call, varName, X, y, split, lambda, NodeRotateF
     varName <- c(paste(rep(seq_along(numCat), numCat), unlist(catLabel), sep = "."), varName[-Xcat])
     rm(X1)
     p <- ncol(X)
+  }
+  if (!is.numeric(X)){
+    X=apply(X, 2, as.numeric)
   }
   X <- as.matrix(X)
   colnames(X) <- varName
@@ -524,7 +534,7 @@ ODT.compute <- function(formula, Call, varName, X, y, split, lambda, NodeRotateF
 
       TF <- ifelse(currentNode > 1, (nodeLR[currentNode - 1] == nodeLR[currentNode]) && (nodeCutValue[currentNode - 1] == 0), FALSE)
       if (TF && (split != "mse") && (length(unique(max.col(nodeNumLabel[currentNode - c(1, 0), ]))) == 1)) {
-        idx <- sort(which(nodeRotaMat[, 2] == nodeLR[currentNode]))
+        idx <- which(nodeRotaMat[, 2] == nodeLR[currentNode])
         nodeRotaMat[idx[1], ] <- c(0, nodeLR[currentNode], 0)
         nodeRotaMat <- nodeRotaMat[-c(idx[-1], nrow(nodeRotaMat) - c(1, 0)), , drop = FALSE]
         nodeCutValue[nodeLR[currentNode]] <- 0
@@ -625,7 +635,7 @@ ODT.compute <- function(formula, Call, varName, X, y, split, lambda, NodeRotateF
 
       TF <- ifelse(currentNode > 1, (nodeLR[currentNode - 1] == nodeLR[currentNode]) && (nodeCutValue[currentNode - 1] == 0), FALSE)
       if (TF && (split != "mse") && (length(unique(max.col(nodeNumLabel[currentNode - c(1, 0), ]))) == 1)) {
-        idx <- sort(which(nodeRotaMat[, 2] == nodeLR[currentNode]))
+        idx <- which(nodeRotaMat[, 2] == nodeLR[currentNode])
         nodeRotaMat[idx[1], ] <- c(0, nodeLR[currentNode], 0)
         nodeRotaMat <- nodeRotaMat[-c(idx[-1], nrow(nodeRotaMat) - c(1, 0)), , drop = FALSE]
         nodeCutValue[nodeLR[currentNode]] <- 0
