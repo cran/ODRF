@@ -27,16 +27,21 @@
 #' @param na.action A function to specify the action to be taken if NAs are found. (NOTE: If given, this argument must be named.)
 #' @param catLabel A category labels of class \code{list} in predictors. (default NULL, for details see Examples)
 #' @param Xcat A class \code{vector} is used to indicate which predictor is the categorical variable. The default Xcat=0 means that no special treatment is given to category variables.
-#' When Xcat=NULL, the predictor x that satisfies the condition (length(unique(x))<10) & (n>20) is judged to be a category variable.
+#' When Xcat=NULL, the predictor x that satisfies the condition "\code{(length(table(x))<10) & (length(x)>20)}" is judged to be a category variable.
 #' @param Xscale Predictor standardization methods. " Min-max" (default), "Quantile", "No" denote Min-max transformation, Quantile transformation and No transformation respectively.
-#' @param TreeRandRotate If or not to randomly rotate the Training data before building the tree (default FALSE, see \code{\link[ODRF]{RandRot}}).
+#' @param TreeRandRotate If or not to randomly rotate the training data before building the tree (default FALSE, see \code{\link[ODRF]{RandRot}}).
 #' @param ... Optional parameters to be passed to the low level function.
 #'
 #' @return An object of class ODT containing a list of components::
 #' \itemize{
 #' \item{\code{call}: The original call to ODT.}
 #' \item{\code{terms}: An object of class \code{c("terms", "formula")} (see \code{\link{terms.object}}) summarizing the formula. Used by various methods, but typically not of direct relevance to users.}
+#' \item{\code{split}, \code{Levels} and \code{NodeRotateFun} are important parameters for building the tree.}
+#' \item{\code{predicted}: the predicted values of the training data.}
 #' \item{\code{projections}: Projection direction for each split node.}
+#' \item{\code{paramList}: Parameters in a named list to be used by \code{NodeRotateFun}.}
+#' \item{\code{data}: The list of data related parameters used to build the tree.}
+#' \item{\code{tree}: The list of tree related parameters used to build the tree.}
 #' \item{\code{structure}: A set of tree structure data records.
 #' \itemize{
 #' \item{\code{nodeRotaMat}: Record the split variables (first column), split node serial number (second column) and rotation direction (third column) for each node. (The first column and the third column are 0 means leaf nodes)}
@@ -46,10 +51,6 @@
 #' \item{\code{childNode}: Record the number of child nodes after each splitting.}
 #' \item{\code{nodeDepth}: Record the depth of the tree where each node is located.}
 #' }}
-#' \item{\code{split}, \code{Levels} and \code{NodeRotateFun} are important parameters for building the tree.}
-#' \item{\code{paramList}: Parameters in a named list to be used by \code{NodeRotateFun}.}
-#' \item{\code{data}: The list of data related parameters used to build the tree.}
-#' \item{\code{tree}: The list of tree related parameters used to build the tree.}
 #' }
 #'
 #' @seealso \code{\link{online.ODT}} \code{\link{prune.ODT}} \code{\link{as.party}} \code{\link{predict.ODT}} \code{\link{print.ODT}} \code{\link{plot.ODT}} \code{\link{plot_ODT_depth}}
@@ -91,6 +92,8 @@
 #' print(round(tree[["projections"]],3))
 #'
 #' ### Train ODT on one-of-K encoded categorical data ###
+#' # Note that the category variable must be placed at the beginning of the predictor X
+#' # as in the following example.
 #' set.seed(22)
 #' Xcol1 <- sample(c("A", "B", "C"), 100, replace = TRUE)
 #' Xcol2 <- sample(c("1", "2", "3", "4", "5"), 100, replace = TRUE)
@@ -145,7 +148,7 @@
 #' #> $Xcol2
 #' #> [1] "1" "2" "3" "4" "5"
 #'
-#' tree <- ODT(X, y, split = "gini", Xcat = c(1, 2), catLabel = catLabel)
+#' tree <- ODT(X, y, split = "gini", Xcat = c(1, 2), catLabel = catLabel,NodeRotateFun = "RotMatRF")
 #'
 #' @import Rcpp
 #' @importFrom stats model.frame model.extract model.matrix na.fail
@@ -215,7 +218,22 @@ ODT.formula <- function(formula, data = NULL, split = "auto", lambda = "log", No
     varName <- c(yname, varName)
   }
 
-  ppTree <- ODT.compute(
+  if(NodeRotateFun=="RotMatRF"&&is.null(paramList$numProj)){
+    if (is.null(Xcat)) {
+      n=length(y)
+      Xcat <- which(apply(X, 2, function(x) {
+        (length(table(x)) < 10) & (n > 20)
+      }))
+    }
+    if (sum(Xcat) > 0) {
+      numCat <- apply(X[, Xcat, drop = FALSE], 2, function(x) length(table(x)))
+      p=ncol(X) - sum(numCat) - length(Xcat)
+      paramList$numProj <- ceiling(sqrt(p))
+    }
+  }
+
+
+  ppTree <- ODT_compute(
     formula, Call, varName, X, y, split, lambda, NodeRotateFun, FunDir, paramList, MaxDepth, numNode,
     MinLeaf, Levels, subset, weights, na.action, catLabel, Xcat, Xscale, TreeRandRotate
   )
@@ -233,7 +251,7 @@ ODT.formula <- function(formula, data = NULL, split = "auto", lambda = "log", No
     rownames(projections) <- paste("proj", seq_along(cutNode), sep = "")
   }
 
-  ppTree <- c(ppTree[seq(5)], list(projections = projections), ppTree[-seq(5)])
+  ppTree <- c(ppTree[-(length(ppTree)-(3:0))], list(projections = projections), ppTree[(length(ppTree)-(3:0))])
   class(ppTree) <- append(class(ppTree), "ODT")
 
   return(ppTree)
@@ -272,7 +290,22 @@ ODT.default <- function(X, y, split = "auto", lambda = "log", NodeRotateFun = "R
     Call$y <- NULL
   }
 
-  ppTree <- ODT.compute(
+  if(NodeRotateFun=="RotMatRF"&&is.null(paramList$numProj)){
+    if (is.null(Xcat)) {
+      n=length(y)
+      Xcat <- which(apply(X, 2, function(x) {
+        (length(table(x)) < 10) & (n > 20)
+      }))
+    }
+    if (sum(Xcat) > 0) {
+      numCat <- apply(X[, Xcat, drop = FALSE], 2, function(x) length(table(x)))
+      p=ncol(X) - sum(numCat) - length(Xcat)
+      paramList$numProj <- ceiling(sqrt(p))
+    }
+  }
+
+
+  ppTree <- ODT_compute(
     formula, Call, varName, X, y, split, lambda, NodeRotateFun, FunDir, paramList, MaxDepth, numNode,
     MinLeaf, Levels, subset, weights, na.action, catLabel, Xcat, Xscale, TreeRandRotate
   )
@@ -290,7 +323,7 @@ ODT.default <- function(X, y, split = "auto", lambda = "log", NodeRotateFun = "R
     rownames(projections) <- paste("proj", seq_along(cutNode), sep = "")
   }
 
-  ppTree <- c(ppTree[seq(5)], list(projections = projections), ppTree[-seq(5)])
+  ppTree <- c(ppTree[-(length(ppTree)-(3:0))], list(projections = projections), ppTree[(length(ppTree)-(3:0))])
   class(ppTree) <- append(class(ppTree), "ODT")
 
   return(ppTree)
@@ -298,7 +331,7 @@ ODT.default <- function(X, y, split = "auto", lambda = "log", NodeRotateFun = "R
 
 #' @keywords internal
 #' @noRd
-ODT.compute <- function(formula, Call, varName, X, y, split, lambda, NodeRotateFun, FunDir, paramList, MaxDepth, numNode,
+ODT_compute <- function(formula, Call, varName, X, y, split, lambda, NodeRotateFun, FunDir, paramList, MaxDepth, numNode,
                         MinLeaf, Levels, subset, weights, na.action, catLabel, Xcat, Xscale, TreeRandRotate) {
   if (is.factor(y) && (split == "auto")) {
     split <- "gini"
@@ -334,8 +367,9 @@ ODT.compute <- function(formula, Call, varName, X, y, split, lambda, NodeRotateF
 
   if (split != "mse") {
     if (is.null(Levels)) {
-      Levels <- levels(as.factor(y))
-      y <- as.integer(as.factor(y))
+      y <- as.factor(y)
+      Levels <- levels(y)
+      y <- as.integer(y)
     }
     maxLabel <- length(Levels)
     if (length(Levels) == 1) {
@@ -348,7 +382,7 @@ ODT.compute <- function(formula, Call, varName, X, y, split, lambda, NodeRotateF
 
   if (is.null(Xcat)) {
     Xcat <- which(apply(X, 2, function(x) {
-      (length(unique(x)) < 10) & (n > 20)
+      (length(table(x)) < 10) & (n > 20)
     }))
   }
 
@@ -373,11 +407,12 @@ ODT.compute <- function(formula, Call, varName, X, y, split, lambda, NodeRotateF
     rm(X1)
     p <- ncol(X)
   }
+  X <- as.matrix(X)
+  colnames(X) <- varName
   if (!is.numeric(X)){
     X=apply(X, 2, as.numeric)
   }
-  X <- as.matrix(X)
-  colnames(X) <- varName
+
 
   if (all(apply(X, 2, is.character)) && (sum(Xcat) > 0)) {
     stop("The training data 'data' contains categorical variables, so that 'Xcal=NULL' can be automatically transformed into an one-of-K encode variables.")
@@ -385,7 +420,7 @@ ODT.compute <- function(formula, Call, varName, X, y, split, lambda, NodeRotateF
 
   # address na values.
   data <- data.frame(y, X)
-  if (any(is.na(as.list(data)))) {
+  if (any(is.na(data))) {
     warning("NA values exist in data frame")
   }
 
@@ -530,7 +565,7 @@ ODT.compute <- function(formula, Call, varName, X, y, split, lambda, NodeRotateF
       }
       nodeNumLabel <- rbind(nodeNumLabel, leafLabel)
       nodeRotaMat <- rbind(nodeRotaMat, c(0, currentNode, 0))
-      nodeXIndx[currentNode] <- NA
+      #nodeXIndx[currentNode] <- NA
 
       TF <- ifelse(currentNode > 1, (nodeLR[currentNode - 1] == nodeLR[currentNode]) && (nodeCutValue[currentNode - 1] == 0), FALSE)
       if (TF && (split != "mse") && (length(unique(max.col(nodeNumLabel[currentNode - c(1, 0), ]))) == 1)) {
@@ -551,6 +586,7 @@ ODT.compute <- function(formula, Call, varName, X, y, split, lambda, NodeRotateF
         nodeNumLabel[nodeLR[currentNode], ] <- colSums(nodeNumLabel[currentNode - c(1, 0), ])
         nodeNumLabel <- nodeNumLabel[-(currentNode - c(1, 0)), ]
         nodeDepth <- nodeDepth[-(currentNode - c(1, 0))]
+        nodeXIndx[[nodeLR[currentNode]]] <- unlist(nodeXIndx[currentNode - c(1, 0)])
         nodeXIndx <- nodeXIndx[-(currentNode - c(1, 0))]
         nodeLR <- nodeLR[-(currentNode - c(1, 0))]
         freeNode <- freeNode - 2
@@ -631,7 +667,7 @@ ODT.compute <- function(formula, Call, varName, X, y, split, lambda, NodeRotateF
       }
       nodeNumLabel <- rbind(nodeNumLabel, leafLabel)
       nodeRotaMat <- rbind(nodeRotaMat, c(0, currentNode, 0))
-      nodeXIndx[currentNode] <- NA
+      #nodeXIndx[currentNode] <- NA
 
       TF <- ifelse(currentNode > 1, (nodeLR[currentNode - 1] == nodeLR[currentNode]) && (nodeCutValue[currentNode - 1] == 0), FALSE)
       if (TF && (split != "mse") && (length(unique(max.col(nodeNumLabel[currentNode - c(1, 0), ]))) == 1)) {
@@ -652,6 +688,7 @@ ODT.compute <- function(formula, Call, varName, X, y, split, lambda, NodeRotateF
         nodeNumLabel[nodeLR[currentNode], ] <- colSums(nodeNumLabel[currentNode - c(1, 0), ])
         nodeNumLabel <- nodeNumLabel[-(currentNode - c(1, 0)), ]
         nodeDepth <- nodeDepth[-(currentNode - c(1, 0))]
+        nodeXIndx[[nodeLR[currentNode]]] <- unlist(nodeXIndx[currentNode - c(1, 0)])
         nodeXIndx <- nodeXIndx[-(currentNode - c(1, 0))]
         nodeLR <- nodeLR[-(currentNode - c(1, 0))]
         freeNode <- freeNode - 2
@@ -694,7 +731,24 @@ ODT.compute <- function(formula, Call, varName, X, y, split, lambda, NodeRotateF
     rownames(nodeNumLabel) <- nodeDepth
   }
 
-  ppTree <- list(call = Call, terms = Terms, split = split, Levels = Levels, NodeRotateFun = NodeRotateFun, paramList = paramList)
+  predicted=rep(0,n)
+  idx=which(!is.na(nodeXIndx[1:(currentNode - 1)]))
+  if (split %in% c("gini","entropy")) {
+    if(all(nodeCutValue == 0)){
+      nodeNumLabel=matrix(nodeNumLabel,nrow = 1, ncol = length(Levels))
+    }
+    nodeLabel <- Levels[max.col(nodeNumLabel)]
+    nodeLabel[which(rowSums(nodeNumLabel) == 0)] <- "0"
+  }
+  if(split == "mse"){
+    nodeLabel <- nodeNumLabel[, 1]
+  }
+  for (i in idx) {
+    predicted[nodeXIndx[[i]]]=nodeLabel[i]
+    names(predicted)[nodeXIndx[[i]]]=i
+  }
+
+  ppTree <- list(call = Call, terms = Terms, split = split, Levels = Levels, NodeRotateFun = NodeRotateFun, predicted=predicted, paramList = paramList)
   ppTree$data <- list(
     subset = subset, weights = weights, na.action = na.action, n = n, p = p, varName = varName,
     Xscale = Xscale, minCol = minCol, maxminCol = maxminCol, Xcat = Xcat, catLabel = catLabel,

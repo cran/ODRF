@@ -22,7 +22,7 @@
 #' @param storeOOB If TRUE then the samples omitted during the creation of a tree are stored as part of the tree (default TRUE).
 #' @param replacement if TRUE then n samples are chosen, with replacement, from training data (default TRUE).
 #' @param stratify If TRUE then class sample proportions are maintained during the random sampling. Ignored if replacement = FALSE (default TRUE).
-#' @param numOOB  Ratio of 'out-of-bag' (default 1/3).
+#' @param ratOOB  Ratio of 'out-of-bag' (default 1/3).
 #' @param parallel Parallel computing or not (default TRUE).
 #' @param numCores Number of cores to be used for parallel computing (default \code{Inf}).
 #' @param MaxDepth The maximum depth of the tree (default \code{Inf}).
@@ -32,26 +32,27 @@
 #' @param weights Vector of non-negative observational weights; fractional weights are allowed (default NULL).
 #' @param na.action A function to specify the action to be taken if NAs are found. (NOTE: If given, this argument must be named.)
 #' @param catLabel A category labels of class \code{list} in predictors. (default NULL, for details see Examples)
-#' @param Xcat A class \code{vector} is used to indicate which predictor is the categorical variable, the default \code{Xcat}=0 means that no special treatment is given to category variables.
-#' When Xcat=NULL, the predictor x that satisfies the condition (length(unique(x))<10) & (n>20) is judged to be a category variable.
+#' @param Xcat A class \code{vector} is used to indicate which predictor is the categorical variable. The default Xcat=0 means that no special treatment is given to category variables.
+#' When Xcat=NULL, the predictor x that satisfies the condition "\code{(length(table(x))<10) & (length(x)>20)}" is judged to be a category variable.
 #' @param Xscale Predictor standardization methods. " Min-max" (default), "Quantile", "No" denote Min-max transformation, Quantile transformation and No transformation respectively.
-#' @param TreeRandRotate If or not to randomly rotate the Training data before building the tree (default FALSE, see \code{\link[ODRF]{RandRot}}).
+#' @param TreeRandRotate If or not to randomly rotate the training data before building the tree (default FALSE, see \code{\link[ODRF]{RandRot}}).
 #' @param ... Optional parameters to be passed to the low level function.
 #'
 #' @return An object of class ODRF Containing a list components:
 #' \itemize{
 #' \item{\code{call}: The original call to ODRF.}
 #' \item{\code{terms}: An object of class \code{c("terms", "formula")} (see \code{\link{terms.object}}) summarizing the formula. Used by various methods, but typically not of direct relevance to users.}
-#' \item{\code{ppTrees}: Each tree used to build the forest. \itemize{
+#' \item{\code{split}, \code{Levels} and \code{NodeRotateFun} are important parameters for building the tree.}
+#' \item{\code{predicted}: the predicted values of the training data based on out-of-bag samples.}
+#' \item{\code{paramList}: Parameters in a named list to be used by \code{NodeRotateFun}.}
+#' \item{\code{oobErr}: 'out-of-bag' error for forest, misclassification rate (MR) for classification or mean square error (MSE) for regression.}
+#' \item{\code{oobConfusionMat}: 'out-of-bag' confusion matrix for forest.}
+#' \item{\code{structure}: Each tree structure used to build the forest. \itemize{
 #' \item{\code{oobErr}: 'out-of-bag' error for tree, misclassification rate (MR) for classification or mean square error (MSE) for regression.}
 #' \item{\code{oobIndex}: Which training data to use as 'out-of-bag'.}
 #' \item{\code{oobPred}: Predicted value for 'out-of-bag'.}
-#' \item{\code{other}: For other tree related values \code{\link{ODT}}.}
+#' \item{\code{others}: Same tree structure return value as \code{\link{ODT}}.}
 #' }}
-#' \item{\code{oobErr}: 'out-of-bag' error for forest, misclassification rate (MR) for classification or mean square error (MSE) for regression.}
-#' \item{\code{oobConfusionMat}: 'out-of-bag' confusion matrix for forest.}
-#' \item{\code{split}, \code{Levels} and \code{NodeRotateFun} are important parameters for building the tree.}
-#' \item{\code{paramList}: Parameters in a named list to be used by \code{NodeRotateFun}.}
 #' \item{\code{data}: The list of data related parameters used to build the forest.}
 #' \item{\code{tree}: The list of tree related parameters used to build the tree.}
 #' \item{\code{forest}: The list of forest related parameters used to build the forest.}
@@ -94,6 +95,8 @@
 #' }
 #'
 #' ### Train ODRF on one-of-K encoded categorical data ###
+#' # Note that the category variable must be placed at the beginning of the predictor X
+#' # as in the following example.
 #' set.seed(22)
 #' Xcol1 <- sample(c("A", "B", "C"), 100, replace = TRUE)
 #' Xcol2 <- sample(c("1", "2", "3", "4", "5"), 100, replace = TRUE)
@@ -157,6 +160,12 @@
 #' )
 #' }
 #'
+#' @useDynLib ODRF, .registration = TRUE
+#' @import Rcpp
+#' @import doParallel
+#' @import foreach
+#' @importFrom parallel detectCores makeCluster clusterSplit stopCluster
+#' @importFrom stats model.frame model.extract model.matrix na.fail
 #' @import rlang
 #' @importFrom glue glue
 #' @importFrom lifecycle deprecated
@@ -171,7 +180,7 @@ ODRF <- function(X, ...) {
 #' @aliases ODRF.formula
 #' @export
 ODRF.formula <- function(formula, data = NULL, split = "auto", lambda = "log", NodeRotateFun = "RotMatPPO", FunDir = getwd(), paramList = NULL,
-                         ntrees = 100, storeOOB = TRUE, replacement = TRUE, stratify = TRUE, numOOB = 1 / 3, parallel = TRUE,
+                         ntrees = 100, storeOOB = TRUE, replacement = TRUE, stratify = TRUE, ratOOB = 1 / 3, parallel = TRUE,
                          numCores = Inf, MaxDepth = Inf, numNode = Inf, MinLeaf = 5, subset = NULL, weights = NULL,
                          na.action = na.fail, catLabel = NULL, Xcat = 0, Xscale = "Min-max", TreeRandRotate = FALSE, ...) {
   Call <- match.call()
@@ -227,9 +236,9 @@ ODRF.formula <- function(formula, data = NULL, split = "auto", lambda = "log", N
     varName <- c(yname, varName)
   }
 
-  forest <- ODRF.compute(
+  forest <- ODRF_compute(
     formula, Call, varName, X, y, split, lambda, NodeRotateFun, FunDir, paramList,
-    ntrees, storeOOB, replacement, stratify, numOOB, parallel,
+    ntrees, storeOOB, replacement, stratify, ratOOB, parallel,
     numCores, MaxDepth, numNode, MinLeaf, subset, weights,
     na.action, catLabel, Xcat, Xscale, TreeRandRotate
   )
@@ -244,7 +253,7 @@ ODRF.formula <- function(formula, data = NULL, split = "auto", lambda = "log", N
 #' @aliases ODRF.default
 #' @export
 ODRF.default <- function(X, y, split = "auto", lambda = "log", NodeRotateFun = "RotMatPPO", FunDir = getwd(), paramList = NULL,
-                         ntrees = 100, storeOOB = TRUE, replacement = TRUE, stratify = TRUE, numOOB = 1 / 3, parallel = TRUE,
+                         ntrees = 100, storeOOB = TRUE, replacement = TRUE, stratify = TRUE, ratOOB = 1 / 3, parallel = TRUE,
                          numCores = Inf, MaxDepth = Inf, numNode = Inf, MinLeaf = 5, subset = NULL, weights = NULL,
                          na.action = na.fail, catLabel = NULL, Xcat = 0, Xscale = "Min-max", TreeRandRotate = FALSE, ...) {
   Call <- match.call()
@@ -272,24 +281,18 @@ ODRF.default <- function(X, y, split = "auto", lambda = "log", NodeRotateFun = "
     Call$y <- NULL
   }
 
-  ODRF.compute(
+  ODRF_compute(
     formula, Call, varName, X, y, split, lambda, NodeRotateFun, FunDir, paramList,
-    ntrees, storeOOB, replacement, stratify, numOOB, parallel,
+    ntrees, storeOOB, replacement, stratify, ratOOB, parallel,
     numCores, MaxDepth, numNode, MinLeaf, subset, weights,
     na.action, catLabel, Xcat, Xscale, TreeRandRotate
   )
 }
 
-#' @useDynLib ODRF, .registration = TRUE
-#' @import Rcpp
-#' @import doParallel
-#' @import foreach
-#' @importFrom parallel detectCores makeCluster clusterSplit stopCluster
-#' @importFrom stats model.frame model.extract model.matrix na.fail
 #' @keywords internal
 #' @noRd
-ODRF.compute <- function(formula, Call, varName, X, y, split, lambda, NodeRotateFun, FunDir, paramList,
-                         ntrees, storeOOB, replacement, stratify, numOOB, parallel,
+ODRF_compute <- function(formula, Call, varName, X, y, split, lambda, NodeRotateFun, FunDir, paramList,
+                         ntrees, storeOOB, replacement, stratify, ratOOB, parallel,
                          numCores, MaxDepth, numNode, MinLeaf, subset, weights,
                          na.action, catLabel, Xcat, Xscale, TreeRandRotate) {
   if (ntrees == 1) {
@@ -320,7 +323,7 @@ ODRF.compute <- function(formula, Call, varName, X, y, split, lambda, NodeRotate
 
   if (is.null(Xcat)) {
     Xcat <- which(apply(X, 2, function(x) {
-      (length(unique(x)) < 10) & (n > 20)
+      (length(table(x)) < 10) & (n > 20)
     }))
   }
 
@@ -398,23 +401,14 @@ ODRF.compute <- function(formula, Call, varName, X, y, split, lambda, NodeRotate
   rm(data)
 
   ppForest <- list(
-    call = Call, terms = Terms, split = split, Levels = NULL,
-    NodeRotateFun = NodeRotateFun, paramList = paramList, oobErr = NULL, oobConfusionMat = NULL
+    call = Call, terms = Terms, split = split, Levels = NULL, NodeRotateFun = NodeRotateFun,
+    predicted=NULL, paramList = paramList, oobErr = NULL, oobConfusionMat = NULL
   )
 
   if (split != "mse") {
-    # adjust y to go from 1 to numClass if needed
-    if (is.factor(y)) {
-      ppForest$Levels <- levels(y)
-      y <- as.integer(y)
-    } else if (is.numeric(y)) {
-      ppForest$Levels <- sort(unique(y))
-      y <- as.integer(as.factor(y))
-    } else {
-      ppForest$Levels <- levels(as.factor(y))
-      y <- as.integer(as.factor(y))
-      # stop("Incompatible X type. y must be of type factor or numeric.")
-    }
+    y <- as.factor(y)
+    ppForest$Levels <- levels(y)
+    y <- as.integer(y)
     if (length(ppForest$Levels) == 1) {
       stop("the number of factor levels of response variable must be greater than one")
     }
@@ -460,11 +454,11 @@ ODRF.compute <- function(formula, Call, varName, X, y, split, lambda, NodeRotate
 
   ppForest$data <- list(
     subset = subset, weights = weights, na.action = na.action, n = n, p = p, varName = varName,
-    Xscale = Xscale, minCol = minCol, maxminCol = maxminCol, Xcat = Xcat, catLabel = catLabel
+    Xscale = Xscale, minCol = minCol, maxminCol = maxminCol, Xcat = Xcat, catLabel = catLabel,TreeRandRotate = TreeRandRotate
   )
-  ppForest$tree <- list(lambda = lambda, FunDir = FunDir, MaxDepth = MaxDepth, MinLeaf = MinLeaf, numNode = numNode, TreeRandRotate = TreeRandRotate)
+  ppForest$tree <- list(lambda = lambda, FunDir = FunDir, MaxDepth = MaxDepth, MinLeaf = MinLeaf, numNode = numNode)
   ppForest$forest <- list(
-    ntrees = ntrees, numOOB = numOOB, storeOOB = storeOOB, replacement = replacement, stratify = stratify,
+    ntrees = ntrees, ratOOB = ratOOB, storeOOB = storeOOB, replacement = replacement, stratify = stratify,
     parallel = parallel, numCores = numCores
   )
 
@@ -494,19 +488,19 @@ ODRF.compute <- function(formula, Call, varName, X, y, split, lambda, NodeRotate
         go <- all(TDindx0 %in% TDindx)
       }
     } else {
-      TDindx <- sample(TDindx0, n * (1 - numOOB), replace = FALSE)
+      TDindx <- sample(TDindx0, ceiling(n * (1 - ratOOB)), replace = FALSE)
     }
 
 
     # data=data.frame(y[TDindx],X[TDindx,])
     # colnames(data)=vars
-    weights1 <- weights[TDindx]
-    ppForestT <- ODT.compute(formula, Call0, varName,
+    ppForestT <- ODT_compute(formula, Call0, varName,
       X = X[TDindx, ], y = y[TDindx], split, lambda, NodeRotateFun, FunDir, paramList, MaxDepth, numNode,
-      MinLeaf, Levels, subset = NULL, weights = weights1, na.action = NULL, catLabel, Xcat = 0L, Xscale = "No", TreeRandRotate
+      MinLeaf, Levels, subset = NULL, weights = weights[TDindx], na.action = NULL, catLabel, Xcat = 0L, Xscale = "No", TreeRandRotate
     )
 
-    if ((numOOB > 0) && storeOOB) {
+    TreeRotate=list(rotdims=ppForestT[["data"]][["rotdims"]],rotmat=ppForestT[["data"]][["rotmat"]])
+    if ((ratOOB > 0) && storeOOB) {
       oobErr <- 1
       NTD <- setdiff(TDindx0, TDindx)
       pred <- predict(ppForestT, X[NTD, ])
@@ -517,10 +511,12 @@ ODRF.compute <- function(formula, Call, varName, X, y, split, lambda, NodeRotate
         oobErr <- mean((pred - y[NTD])^2)
       }
 
-      ppForestT <- c(ppForestT, list(oobErr = oobErr, oobIndex = NTD, oobPred = pred))
+      ppForestT <- c(ppForestT$structure, list(oobErr = oobErr, oobIndex = NTD, oobPred = pred))
+    }else{
+      ppForestT <- ppForestT$structure
     }
 
-    return(ppForestT)
+    return(c(TreeRotate,ppForestT))
   }
 
 
@@ -543,7 +539,7 @@ ODRF.compute <- function(formula, Call, varName, X, y, split, lambda, NodeRotate
     # set.seed(seed)
     icore <- NULL
     ppForestT <- foreach::foreach(
-      icore = seq_along(chunks), .combine = list, .multicombine = TRUE, .export = c("ODT.compute"),
+      icore = seq_along(chunks), .combine = list, .multicombine = TRUE, .export = c("ODT_compute"),
       .packages = c("ODRF"), .noexport = "ppForest"
     ) %dopar% {
       lapply(chunks[[icore]], PPtree)
@@ -552,21 +548,21 @@ ODRF.compute <- function(formula, Call, varName, X, y, split, lambda, NodeRotate
     parallel::stopCluster(cl)
 
     # do.call(rbind.fill,list1)
-    ppForest$ppTrees <- do.call("c", ppForestT)
-    # ppForest$ppTrees=NULL
+    ppForest$structure <- do.call("c", ppForestT)
+    # ppForest$structure=NULL
     # for (i in 1:numCores) {
-    #  ppForest$ppTrees=c(ppForest$ppTrees,ppForestT[[i]])
+    #  ppForest$structure=c(ppForest$structure,ppForestT[[i]])
     # }
   } else {
     # Use just one core.
-    ppForest$ppTrees <- lapply(1:ntrees, PPtree)
+    ppForest$structure <- lapply(1:ntrees, PPtree)
   }
 
   ####################################
-  if ((numOOB > 0) && storeOOB) {
+  if ((ratOOB > 0) && storeOOB) {
     oobVotes <- matrix(NA, n, ntrees)
     for (t in 1:ntrees) {
-      oobVotes[ppForest$ppTrees[[t]]$oobIndex, t] <- ppForest$ppTrees[[t]]$oobPred
+      oobVotes[ppForest$structure[[t]]$oobIndex, t] <- ppForest$structure[[t]]$oobPred
     }
     idx <- which(rowSums(is.na(oobVotes)) < ntrees)
     oobVotes <- oobVotes[idx, , drop = FALSE]
@@ -600,6 +596,8 @@ ODRF.compute <- function(formula, Call, varName, X, y, split, lambda, NodeRotate
       oobPred <- rowMeans(oobVotes, na.rm = TRUE)
       ppForest$oobErr <- mean((oobPred - yy)^2) # / mean((yy - mean(y))^2)
     }
+
+    ppForest$predicted <- oobPred
   }
 
   class(ppForest) <- append(class(ppForest), "ODRF")
