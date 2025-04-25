@@ -11,11 +11,13 @@ ODT(X, ...)
 \method{ODT}{formula}(
   formula,
   data = NULL,
+  Xsplit = NULL,
   split = "auto",
   lambda = "log",
   NodeRotateFun = "RotMatPPO",
   FunDir = getwd(),
   paramList = NULL,
+  glmnetParList = NULL,
   MaxDepth = Inf,
   numNode = Inf,
   MinLeaf = 10,
@@ -33,11 +35,13 @@ ODT(X, ...)
 \method{ODT}{default}(
   X,
   y,
+  Xsplit = NULL,
   split = "auto",
   lambda = "log",
   NodeRotateFun = "RotMatPPO",
   FunDir = getwd(),
   paramList = NULL,
+  glmnetParList = NULL,
   MaxDepth = Inf,
   numNode = Inf,
   MinLeaf = 10,
@@ -61,8 +65,10 @@ ODT(X, ...)
 
 \item{data}{Training data of class \code{data.frame} containing variables named in the formula. If \code{data} is missing it is obtained from the current environment by \code{formula}.}
 
-\item{split}{The criterion used for splitting the nodes. "entropy": information gain and "gini": gini impurity index for classification; "mse": mean square error for regression;
-'auto' (default): If the response in \code{data} or \code{y} is a factor, "gini" is used, otherwise regression is assumed.}
+\item{Xsplit}{Splitting variables used to construct linear model trees. The default value is NULL and is only valid when split="linear".}
+
+\item{split}{The criterion used for splitting the nodes. "entropy": information gain and "gini": gini impurity index for classification; "mse": mean square error for regression; "linear": mean square error for linear model.
+'auto' (default): If the response in \code{data} or \code{y} is a factor, "gini" is used, otherwise "mse" is assumed.}
 
 \item{lambda}{The argument of \code{split} is used to determine the penalty level of the partition criterion. Three options are provided including, \code{lambda=0}: no penalty; \code{lambda=2}: AIC penalty; \code{lambda='log'} (Default): BIC penalty. In Addition, lambda can be any value from 0 to n (training set size).}
 
@@ -77,6 +83,10 @@ including \itemize{
 \item{FunDir}{The path to the \code{function} of the user-defined \code{NodeRotateFun} (default current working directory).}
 
 \item{paramList}{List of parameters used by the functions \code{NodeRotateFun}. If left unchanged, default values will be used, for details see \code{\link[ODRF]{defaults}}.}
+
+\item{glmnetParList}{List of parameters used by the functions \code{glmnet} and \code{cv.glmnet} in package \code{glmnet}.
+\code{glmnetParList=list(lambda = 0)} is Ordinary Least Squares (OLS) regression, \code{glmnetParList=list(family = "gaussian")} (default) is regression model
+and \code{glmnetParList=list(family = "binomial" or "multinomial")} is classification model. If left unchanged, default values will be used, for details see \code{\link[glmnet]{glmnet}} and \code{\link[glmnet]{cv.glmnet}}.}
 
 \item{MaxDepth}{The maximum depth of the tree (default \code{Inf}).}
 
@@ -122,6 +132,8 @@ An object of class ODT containing a list of components::
 \item{\code{nodeCutIndex}: Record the index values of the partitioning variables selected based on the partition criterion \code{split}.}
 \item{\code{childNode}: Record the number of child nodes after each splitting.}
 \item{\code{nodeDepth}: Record the depth of the tree where each node is located.}
+\item{\code{nodeIndex}: Record the indices of the data used in each node.}
+\item{\code{glmnetFit}: Record the model fitted by function \code{glmnet} used in each node.}
 }}
 }
 }
@@ -154,11 +166,45 @@ pred <- predict(tree, test_data[, -1])
 # estimation error
 mean((pred - test_data[, 1])^2)
 
+# Use "Z" as the splitting variable to build a linear model tree for "X" and "y".
+set.seed(10)
+cutpoint <- 50
+X <- matrix(rnorm(100 * 10), 100, 10)
+age <- sample(seq(20, 80), 100, replace = TRUE)
+height <- sample(seq(50, 200), 100, replace = TRUE)
+weight <- sample(seq(5, 150), 100, replace = TRUE)
+Z <- cbind(age = age, height = height, weight = weight)
+mu <- rep(0, 100)
+mu[age <= cutpoint] <- X[age <= cutpoint, 1] + X[age <= cutpoint, 2]
+mu[age > cutpoint] <- X[age > cutpoint, 1] + X[age > cutpoint, 3]
+y <- mu + rnorm(100)
+# Regression model tree
+my.tree <- ODT(
+  X = X, y = y, Xsplit = Z, split = "linear", lambda = 0,
+  NodeRotateFun = "RotMatRF",
+  glmnetParList = list(lambda = 0, family = "gaussian")
+)
+pred <- predict(my.tree, X, Xsplit = Z)
+# fitting error
+mean((pred - y)^2)
+mean((my.tree$predicted - y)^2)
+# Classification model tree
+y1 <- (y > 0) * 1
+my.tree <- ODT(
+  X = X, y = y1, Xsplit = Z, split = "linear", lambda = 0,
+  NodeRotateFun = "RotMatRF", MinLeaf = 10, MaxDepth = 5,
+  glmnetParList = list(family = "binomial")
+)
+(class <- predict(my.tree, X, Xsplit = Z, type = "pred"))
+(prob <- predict(my.tree, X, Xsplit = Z, type = "prob"))
+
 # Projection analysis of the oblique decision tree.
 data(iris)
-tree <- ODT(Species ~ ., data = iris, split="gini",
-            paramList = list(model = "PPR", numProj = 1))
-print(round(tree[["projections"]],3))
+tree <- ODT(Species ~ .,
+  data = iris, split = "gini",
+  paramList = list(model = "PPR", numProj = 1)
+)
+print(round(tree[["projections"]], 3))
 
 ### Train ODT on one-of-K encoded categorical data ###
 # Note that the category variable must be placed at the beginning of the predictor X
@@ -217,14 +263,14 @@ catLabel
 #> $Xcol2
 #> [1] "1" "2" "3" "4" "5"
 
-tree <- ODT(X, y, split = "gini", Xcat = c(1, 2), catLabel = catLabel,NodeRotateFun = "RotMatRF")
+tree <- ODT(X, y, split = "gini", Xcat = c(1, 2), catLabel = catLabel, NodeRotateFun = "RotMatRF")
 
 }
 \references{
 Zhan, H., Liu, Y., & Xia, Y. (2022). Consistency of The Oblique Decision Tree and Its Random Forest. arXiv preprint arXiv:2211.12653.
 }
 \seealso{
-\code{\link{online.ODT}} \code{\link{prune.ODT}} \code{\link{as.party}} \code{\link{predict.ODT}} \code{\link{print.ODT}} \code{\link{plot.ODT}} \code{\link{plot_ODT_depth}}
+\code{\link{online.ODT}} \code{\link{prune.ODT}} \code{\link{as.party.ODT}} \code{\link{predict.ODT}} \code{\link{print.ODT}} \code{\link{plot.ODT}} \code{\link{plot_ODT_depth}}
 }
 \author{
 Yu Liu and Yingcun Xia

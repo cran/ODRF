@@ -247,7 +247,8 @@ RotMatPPO <- function(X, y, model = "PPR", split = "entropy", weights = NULL, di
 
   # ceiling(sqrt(p))#d#round(p/3)#
   # if((n>Q)&(n>10)&(p>1)){
-  sparseM1 <- NULL
+  # sparseM1 <- NULL
+  sparseM1 <- matrix(0, 0, 3)
   if (n > 10) {
     numProj <- min(p0, numProj)
     d1 <- numProj
@@ -294,7 +295,7 @@ RotMatPPO <- function(X, y, model = "PPR", split = "entropy", weights = NULL, di
   if (n > 10 && nrow(sparseM1) > 1) {
     Yi <- c(y)
     indC <- 0L
-    if (split != "mse") {
+    if (split %in% c("gini", "entropy")) {
       y <- as.factor(y)
       indC <- levels(y)
       if (length(indC) > 2) {
@@ -347,6 +348,7 @@ RotMatPPO <- function(X, y, model = "PPR", split = "entropy", weights = NULL, di
         }
 
         if (inherits(PP, "try-error")) {
+          # LM <- lm(y ~ ., data = data.frame(y=Yi,Xi), weights)
           LM <- lm(Yi ~ ., data = data.frame(Xi), weights)
           if (length(indC) > 2) {
             theta.i <- as.matrix(LM$coefficients)[-1, , drop = FALSE]
@@ -418,7 +420,7 @@ RotMatPPO <- function(X, y, model = "PPR", split = "entropy", weights = NULL, di
 #' library(nnet)
 #' (RotMat <- RotMatMake(X, y, "RotMatPPO", "PPO", paramList = list(model = "Log")))
 #'
-#' ## Define projection matrix function makeRotMat and projection pursuit function makePP.##
+#' ## Define projection matrix function makeRotMat and projection pursuit function makePP.
 #' ##  Note that '...' is necessary.
 #' makeRotMat <- function(dimX, dimProj, numProj, ...) {
 #'   RotMat <- matrix(1, dimProj * numProj, 3)

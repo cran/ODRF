@@ -30,6 +30,7 @@ Mifflin
 NOTEs
 Niewczas
 NodeRotateFun
+ODBT
 ODT
 ODTs
 OL
@@ -62,6 +63,7 @@ Wickham
 Wolberg
 Xcat
 Xnew
+Xsplit
 Zak
 Zhan
 accoding
@@ -70,10 +72,14 @@ arXiv
 bag’
 bottomleft
 bottomright
+cpp
 devtools
 dimProj
+fitL
+fitR
 friedmantukey
 gini
+gmlnet
 hermite
 kurtosismax
 kurtosismin
@@ -91,10 +97,12 @@ piA
 pkgdown
 pois
 poune
+pred
 prediced
 preprint
 projectin
 randomer
+rpart
 signif
 topleft
 topright
